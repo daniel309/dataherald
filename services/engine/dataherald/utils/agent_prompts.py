@@ -78,16 +78,46 @@ tip3) The existence of the string values in the columns should always be checked
 tip4) You should always execute the SQL query by calling the SqlDbQuery tool to make sure the results are correct.
 """  # noqa: E501
 
-FORMAT_INSTRUCTIONS = """Use the following format:
+# FORMAT_INSTRUCTIONS = """Use the following format:
 
-Question: the input question you must answer
-Thought: you should always think about what to do
-Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action
-Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
-Thought: I now know the final answer
-Final Answer: the final answer to the original input question"""
+# Question: the input question you must answer
+# Thought: you should always think about what to do
+# Action: the action to take, should be one of [{tool_names}]
+# Action Input: the input to the action
+# Observation: the result of the action
+# ... (this Thought/Action/Action Input/Observation can repeat N times)
+# Thought: I now know the final answer
+# Final Answer: the final answer to the original input question"""
+
+FORMAT_INSTRUCTIONS = """You have access to the following tools:
+{tools}
+Use a JSON blob to specify a tool by providing an action key (tool name) and an action_input key (tool input).
+Valid "action" values: "Final Answer" or {tool_names}
+Provide only ONE action per $JSON_BLOB, as shown:
+```
+{{
+    "action": $TOOL_NAME,
+    "action_input": $INPUT
+}}
+```
+Follow this format:
+Question: input question to answer
+Thought: consider previous and subsequent steps
+Action:
+```
+$JSON_BLOB
+```
+Observation: action result
+... (repeat Thought/Action/Observation N times)
+Thought: I know what to respond
+Action:
+```
+{{
+    "action": "Final Answer",
+    "action_input": "Final response to human"
+}}
+Reminder to ALWAYS respond with a valid JSON blob of a single action.
+Respond directly if appropriate. Format is Action:```$JSON_BLOB```then Observation"""
 
 SUFFIX_WITH_FEW_SHOT_SAMPLES = """Begin!
 

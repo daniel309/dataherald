@@ -88,6 +88,7 @@ class SupportedDialects(Enum):
     BIGQUERY = "bigquery"
     SQLITE = "sqlite"
     REDSHIFT = "redshift"
+    DB2 = "db2"
 
 
 class DatabaseConnection(BaseModel):
@@ -143,4 +144,6 @@ class DatabaseConnection(BaseModel):
         if self.llm_api_key is not None and self.llm_api_key != "":
             fernet_encrypt = FernetEncrypt()
             return fernet_encrypt.decrypt(self.llm_api_key)
+        if os.environ.get("WATSONX_API_KEY") is not None and os.environ.get("WATSONX_API_KEY") != "":
+            return os.environ.get("WATSONX_API_KEY")
         return os.environ.get("OPENAI_API_KEY")
