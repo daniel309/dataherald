@@ -15,7 +15,6 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.agents.agent import AgentExecutor
 from langchain.agents.agent_toolkits.base import BaseToolkit
 from langchain.agents.mrkl.base import ZeroShotAgent
-from langchain.agents.output_parsers import JSONAgentOutputParser
 from langchain.callbacks.base import BaseCallbackManager
 from langchain.callbacks.manager import (
     AsyncCallbackManagerForToolRun,
@@ -45,12 +44,13 @@ from dataherald.sql_database.models.types import (
     DatabaseConnection,
 )
 from dataherald.sql_generator import EngineTimeOutORItemLimitError, SQLGenerator
-from dataherald.sql_generator.output_parsers import GraniteAgentOutputParser, GraniteAgentOutputParserWithRetries
+from dataherald.sql_generator.output_parsers import GraniteAgentOutputParser
 from dataherald.types import Prompt, SQLGeneration
 from dataherald.utils.agent_prompts import (
     AGENT_PREFIX,
     ERROR_PARSING_MESSAGE,
     FORMAT_INSTRUCTIONS,
+    FORMAT_INSTRUCTIONS_GRANITE,
     PLAN_BASE,
     PLAN_WITH_FEWSHOT_EXAMPLES,
     PLAN_WITH_FEWSHOT_EXAMPLES_AND_INSTRUCTIONS,
@@ -280,7 +280,6 @@ class TablesSQLDatabaseTool(BaseSQLDatabaseTool, BaseTool, Generic[T]):
         run_manager: CallbackManagerForToolRun | None = None,  # noqa: ARG002
     ) -> str:
         """Use the concatenation of table name, columns names, and the description of the table as the table representation"""
-        print("[DEBUG TOOL]", user_question)
         question_embedding = self.get_embedding(user_question)
         table_representations = []
         for table in self.db_scan:
@@ -695,32 +694,33 @@ class DataheraldSQLAgent(SQLGenerator):
         prefix = prefix.format(
             dialect=toolkit.dialect, max_examples=max_examples, agent_plan=plan
         )
-        # prompt = ZeroShotAgent.create_prompt(
-        #     tools,
-        #     prefix=prefix,
-        #     suffix=suffix,
-        #     format_instructions=format_instructions,
-        #     input_variables=input_variables,
-        # )
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", "\n".join([prefix, format_instructions])),
-                MessagesPlaceholder("chat_history", optional=True),
-                ("human", suffix),
-            ]
-        ).partial(
-            tools=render_text_description_and_args(tools),
-            tool_names=", ".join([tool.name for tool in tools]),
-        )
+        if self.system.settings["watsonx_api_key"] is not None:
+            prompt = ChatPromptTemplate.from_messages(
+                [
+                    ("system", "\n".join([prefix, FORMAT_INSTRUCTIONS_GRANITE])),
+                    MessagesPlaceholder("chat_history", optional=True),
+                    ("human", suffix),
+                ]
+            ).partial(
+                tools=render_text_description_and_args(tools),
+                tool_names=", ".join([tool.name for tool in tools]),
+            )
+        else:
+            prompt = ZeroShotAgent.create_prompt(
+                tools,
+                prefix=prefix,
+                suffix=suffix,
+                format_instructions=format_instructions,
+                input_variables=input_variables,
+            )
         llm_chain = LLMChain(
             llm=self.llm,
             prompt=prompt,
             callback_manager=callback_manager,
         )
-        print("[DEBUG PROMPT]")
-        prompt.pretty_print()
         tool_names = [tool.name for tool in tools]
-        agent = ZeroShotAgent(llm_chain=llm_chain, allowed_tools=tool_names, output_parser=GraniteAgentOutputParser(), **kwargs)
+        output_parser = None if self.system.settings["watsonx_api_key"] is None else GraniteAgentOutputParser()
+        agent = ZeroShotAgent(llm_chain=llm_chain, allowed_tools=tool_names, output_parser=output_parser, **kwargs)
         return AgentExecutor.from_agent_and_tools(
             agent=agent,
             tools=tools,
@@ -858,7 +858,6 @@ class DataheraldSQLAgent(SQLGenerator):
                     status="INVALID",
                     error=str(e),
                 )
-        print("[DEBUG RESULT]", result)
         sql_query = ""
         if "```sql" in result["output"]:
             sql_query = self.remove_markdown(result["output"])

@@ -78,18 +78,18 @@ tip3) The existence of the string values in the columns should always be checked
 tip4) You should always execute the SQL query by calling the SqlDbQuery tool to make sure the results are correct.
 """  # noqa: E501
 
-# FORMAT_INSTRUCTIONS = """Use the following format:
+FORMAT_INSTRUCTIONS = """Use the following format:
 
-# Question: the input question you must answer
-# Thought: you should always think about what to do
-# Action: the action to take, should be one of [{tool_names}]
-# Action Input: the input to the action
-# Observation: the result of the action
-# ... (this Thought/Action/Action Input/Observation can repeat N times)
-# Thought: I now know the final answer
-# Final Answer: the final answer to the original input question"""
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take, should be one of [{tool_names}]
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now know the final answer
+Final Answer: the final answer to the original input question"""
 
-FORMAT_INSTRUCTIONS = """You have access to the following tools:
+FORMAT_INSTRUCTIONS_GRANITE = """You have access to the following tools:
 {tools}
 Use a JSON blob to specify a tool by providing an action key (tool name) and an action_input key (tool input).
 Valid "action" values: "Final Answer" or {tool_names}

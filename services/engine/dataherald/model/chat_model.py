@@ -7,7 +7,6 @@ from overrides import override
 
 from dataherald.model import LLMModel
 from dataherald.sql_database.models.types import DatabaseConnection
-from dataherald.model.chat_models import ChatWatsonx
 
 
 class ChatModel(LLMModel):
@@ -57,13 +56,10 @@ class ChatModel(LLMModel):
         if model_family == "cohere":
             return ChatCohere(model_name=model_name, cohere_api_key=api_key, **kwargs)
         if model_family == "ibm":
-            # return WatsonxLLM(
-            #     model_id=model_name,
-            #     apikey=api_key,
-            #     url=api_base,
-            #     project_id=self.system.settings["watsonx_project_id"],
-            # )
-            return ChatWatsonx(
-                model_name=model_name, watsonx_api_key=api_key
+            return WatsonxLLM(
+                model_id=model_name,
+                apikey=api_key,
+                url=api_base,
+                project_id=self.system.settings["watsonx_project_id"],
             )
         raise ValueError("No valid API key environment variable found")
