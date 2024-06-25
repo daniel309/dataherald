@@ -5,12 +5,13 @@ import os
 from functools import wraps
 from queue import Queue
 from threading import Thread
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, Generic, List, TypeVar
 
 import numpy as np
 import openai
 import pandas as pd
 from google.api_core.exceptions import GoogleAPIError
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.agents.agent import AgentExecutor
 from langchain.agents.agent_toolkits.base import BaseToolkit
 from langchain.agents.mrkl.base import ZeroShotAgent
@@ -21,8 +22,11 @@ from langchain.callbacks.manager import (
 )
 from langchain.chains.llm import LLMChain
 from langchain.tools.base import BaseTool
+from langchain.tools.render import render_text_description_and_args
 from langchain_community.callbacks import get_openai_callback
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_openai import AzureOpenAIEmbeddings, OpenAIEmbeddings
+from langchain_ibm import WatsonxEmbeddings
 from overrides import override
 from pydantic import BaseModel, Field
 from sql_metadata import Parser
@@ -40,11 +44,13 @@ from dataherald.sql_database.models.types import (
     DatabaseConnection,
 )
 from dataherald.sql_generator import EngineTimeOutORItemLimitError, SQLGenerator
+from dataherald.sql_generator.output_parsers import GraniteAgentOutputParser
 from dataherald.types import Prompt, SQLGeneration
 from dataherald.utils.agent_prompts import (
     AGENT_PREFIX,
     ERROR_PARSING_MESSAGE,
     FORMAT_INSTRUCTIONS,
+    FORMAT_INSTRUCTIONS_GRANITE,
     PLAN_BASE,
     PLAN_WITH_FEWSHOT_EXAMPLES,
     PLAN_WITH_FEWSHOT_EXAMPLES_AND_INSTRUCTIONS,
@@ -60,6 +66,10 @@ logger = logging.getLogger(__name__)
 TOP_K = SQLGenerator.get_upper_bound_limit()
 EMBEDDING_MODEL = "text-embedding-3-large"
 TOP_TABLES = 20
+
+
+# Define a type variable
+T = TypeVar('T')
 
 
 def catch_exceptions():  # noqa: C901
@@ -214,7 +224,7 @@ class GetUserInstructions(BaseSQLDatabaseTool, BaseTool):
         raise NotImplementedError("GetUserInstructions does not support async")
 
 
-class TablesSQLDatabaseTool(BaseSQLDatabaseTool, BaseTool):
+class TablesSQLDatabaseTool(BaseSQLDatabaseTool, BaseTool, Generic[T]):
     """Tool which takes in the given question and returns a list of tables with their relevance score to the question"""
 
     name = "DbTablesWithRelevanceScores"
@@ -224,7 +234,7 @@ class TablesSQLDatabaseTool(BaseSQLDatabaseTool, BaseTool):
     Use this tool to identify the relevant tables for the given question.
     """
     db_scan: List[TableDescription]
-    embedding: OpenAIEmbeddings
+    embedding: T
     few_shot_examples: List[dict] | None = Field(exclude=True, default=None)
 
     def get_embedding(
@@ -563,7 +573,7 @@ class GetFewShotExamples(BaseSQLDatabaseTool, BaseTool):
         raise NotImplementedError("GetFewShotExamplesTool does not support async")
 
 
-class SQLDatabaseToolkit(BaseToolkit):
+class SQLDatabaseToolkit(BaseToolkit, Generic[T]):
     """Dataherald toolkit"""
 
     db: SQLDatabase = Field(exclude=True)
@@ -571,7 +581,7 @@ class SQLDatabaseToolkit(BaseToolkit):
     few_shot_examples: List[dict] | None = Field(exclude=True, default=None)
     instructions: List[dict] | None = Field(exclude=True, default=None)
     db_scan: List[TableDescription] = Field(exclude=True)
-    embedding: OpenAIEmbeddings = Field(exclude=True)
+    embedding: T = Field(exclude=True)
     is_multiple_schema: bool = False
 
     @property
@@ -597,7 +607,7 @@ class SQLDatabaseToolkit(BaseToolkit):
             )
         get_current_datetime = SystemTime(db=self.db, context=self.context)
         tools.append(get_current_datetime)
-        tables_sql_db_tool = TablesSQLDatabaseTool(
+        tables_sql_db_tool = TablesSQLDatabaseTool[T](
             db=self.db,
             context=self.context,
             db_scan=self.db_scan,
@@ -684,20 +694,33 @@ class DataheraldSQLAgent(SQLGenerator):
         prefix = prefix.format(
             dialect=toolkit.dialect, max_examples=max_examples, agent_plan=plan
         )
-        prompt = ZeroShotAgent.create_prompt(
-            tools,
-            prefix=prefix,
-            suffix=suffix,
-            format_instructions=format_instructions,
-            input_variables=input_variables,
-        )
+        if self.system.settings["watsonx_api_key"] is not None:
+            prompt = ChatPromptTemplate.from_messages(
+                [
+                    ("system", "\n".join([prefix, FORMAT_INSTRUCTIONS_GRANITE])),
+                    MessagesPlaceholder("chat_history", optional=True),
+                    ("human", suffix),
+                ]
+            ).partial(
+                tools=render_text_description_and_args(tools),
+                tool_names=", ".join([tool.name for tool in tools]),
+            )
+        else:
+            prompt = ZeroShotAgent.create_prompt(
+                tools,
+                prefix=prefix,
+                suffix=suffix,
+                format_instructions=format_instructions,
+                input_variables=input_variables,
+            )
         llm_chain = LLMChain(
             llm=self.llm,
             prompt=prompt,
             callback_manager=callback_manager,
         )
         tool_names = [tool.name for tool in tools]
-        agent = ZeroShotAgent(llm_chain=llm_chain, allowed_tools=tool_names, **kwargs)
+        output_parser = None if self.system.settings["watsonx_api_key"] is None else GraniteAgentOutputParser()
+        agent = ZeroShotAgent(llm_chain=llm_chain, allowed_tools=tool_names, output_parser=output_parser, **kwargs)
         return AgentExecutor.from_agent_and_tools(
             agent=agent,
             tools=tools,
@@ -754,8 +777,35 @@ class DataheraldSQLAgent(SQLGenerator):
         logger.info(f"Generating SQL response to question: {str(user_prompt.dict())}")
         self.database = SQLDatabase.get_sql_engine(database_connection)
         # Set Embeddings class depending on azure / not azure
-        if self.system.settings["azure_api_key"] is not None:
-            toolkit = SQLDatabaseToolkit(
+        if self.system.settings["watsonx_api_key"] is not None:
+            # toolkit = SQLDatabaseToolkit[WatsonxEmbeddings](
+            #     db=self.database,
+            #     context=context,
+            #     few_shot_examples=new_fewshot_examples,
+            #     instructions=instructions,
+            #     is_multiple_schema=True if user_prompt.schemas else False,
+            #     db_scan=db_scan,
+            #     embedding=WatsonxEmbeddings(
+            #         apikey=database_connection.decrypt_api_key(),
+            #         model_id="ibm/slate-125m-english-rtrvr",
+            #         url=self.llm_config.api_base,
+            #         project_id=self.system.settings["watsonx_project_id"],
+            #     ),
+            # )
+            toolkit = SQLDatabaseToolkit[HuggingFaceEmbeddings](
+                db=self.database,
+                context=context,
+                few_shot_examples=new_fewshot_examples,
+                instructions=instructions,
+                is_multiple_schema=True if user_prompt.schemas else False,
+                db_scan=db_scan,
+                embedding=HuggingFaceEmbeddings(
+                    model_name='sentence-transformers/all-MiniLM-L6-v2',
+                    model_kwargs={'device': 'cpu'}
+                )
+            )
+        elif self.system.settings["azure_api_key"] is not None:
+            toolkit = SQLDatabaseToolkit[OpenAIEmbeddings](
                 db=self.database,
                 context=context,
                 few_shot_examples=new_fewshot_examples,
@@ -768,7 +818,7 @@ class DataheraldSQLAgent(SQLGenerator):
                 ),
             )
         else:
-            toolkit = SQLDatabaseToolkit(
+            toolkit = SQLDatabaseToolkit[OpenAIEmbeddings](
                 db=self.database,
                 context=context,
                 few_shot_examples=new_fewshot_examples,
@@ -884,7 +934,7 @@ class DataheraldSQLAgent(SQLGenerator):
                 openai_api_key=database_connection.decrypt_api_key(),
                 model=EMBEDDING_MODEL,
             )
-            toolkit = SQLDatabaseToolkit(
+            toolkit = SQLDatabaseToolkit[OpenAIEmbeddings](
                 queuer=queue,
                 db=self.database,
                 context=[{}],

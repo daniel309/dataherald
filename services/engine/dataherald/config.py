@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     only_store_csv_files_locally: bool | None = os.environ.get(
         "ONLY_STORE_CSV_FILES_LOCALLY", False
     )
+    # Needed for Watsonx IBM integration:
+    watsonx_api_key: str | None = os.environ.get("WATSONX_API_KEY")
+    watsonx_project_id: str | None = os.environ.get("WATSONX_PROJECT_ID")
 
     def require(self, key: str) -> Any:
         val = self[key]

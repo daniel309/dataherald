@@ -190,3 +190,6 @@ id_rsa
 id_ed25519
 dataherald/key.pem
 >>>>>>> 8ca2f3fb (Initial commit)
+
+# license
+license/

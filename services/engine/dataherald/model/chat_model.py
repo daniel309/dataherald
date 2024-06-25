@@ -2,6 +2,7 @@ from typing import Any
 
 from langchain_community.chat_models import ChatAnthropic, ChatCohere, ChatGooglePalm
 from langchain_openai import AzureChatOpenAI, ChatOpenAI
+from langchain_ibm import WatsonxLLM
 from overrides import override
 
 from dataherald.model import LLMModel
@@ -22,7 +23,9 @@ class ChatModel(LLMModel):
         **kwargs: Any
     ) -> Any:
         api_key = database_connection.decrypt_api_key()
-        if self.system.settings["azure_api_key"] is not None:
+        if self.system.settings["watsonx_api_key"] is not None:
+            model_family = "ibm"
+        elif self.system.settings["azure_api_key"] is not None:
             model_family = "azure"
         if model_family == "azure":
             if api_base.endswith("/"):  # check where final "/" is added to api_base
@@ -52,4 +55,11 @@ class ChatModel(LLMModel):
             )
         if model_family == "cohere":
             return ChatCohere(model_name=model_name, cohere_api_key=api_key, **kwargs)
+        if model_family == "ibm":
+            return WatsonxLLM(
+                model_id=model_name,
+                apikey=api_key,
+                url=api_base,
+                project_id=self.system.settings["watsonx_project_id"],
+            )
         raise ValueError("No valid API key environment variable found")

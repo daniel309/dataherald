@@ -4,6 +4,7 @@ httpx==0.27.0
 langchain==0.1.11
 langchain-community==0.0.25
 langchain-openai==0.0.8
+langchain-ibm==0.1.7
 load-dotenv==0.1.0
 mypy-extensions==1.0.0
 openai==1.11.1
@@ -27,6 +28,8 @@ snowflake-sqlalchemy==1.4.7
 databricks-sql-connector==2.7.0
 sqlalchemy-databricks==0.2.0
 sqlalchemy-bigquery==1.6.1
+ibm_db==3.2.3
+ibm_db_sa==0.4.0
 chromadb==0.4.12
 pytest-dotenv==0.5.2
 pinecone-client==3.1.0
@@ -44,3 +47,5 @@ clickhouse-sqlalchemy==0.2.5
 astrapy==0.7.6
 pymssql==2.2.11
 sqlalchemy-redshift==0.8.14
+
+sentence-transformers==3.0.1
